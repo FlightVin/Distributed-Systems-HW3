@@ -1,0 +1,4 @@
+.vscode
+*_out
+input
+*.out
