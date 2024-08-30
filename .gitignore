@@ -1,4 +1,5 @@
 .vscode
-*_out
-input
-*.out
+*out*
+*input*
+
+ignore_this/
