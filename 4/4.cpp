@@ -58,40 +58,6 @@ void swap_rows_in_square_matrix(double** arr, int N, int i, int j) {
     }
 }
 
-void initial_row_switcheratoo(
-    int process_rank,
-    int num_processes,
-    int N,
-    double** matrix,
-    double** identity
-) {
-    for (int i = 0; i<N; i++) {
-        if (check_if_row_in_scope_of_process(process_rank, num_processes, i) && matrix[i][i] == 0) {
-            int next_non_zero_in_column = -1;
-            for (int j = i + 1; j < N; j++) {
-                if (matrix[j][i] != 0) {
-                    next_non_zero_in_column = j;
-                    break;
-                }
-            }
-
-            if (next_non_zero_in_column != -1) {
-                swap_rows_in_square_matrix(matrix, N, i, next_non_zero_in_column);
-                swap_rows_in_square_matrix(identity, N, i, next_non_zero_in_column);
-
-                // Broadcast this swap to everyone
-                MPI_Bcast(&matrix[i][0], N, MPI_DOUBLE, process_rank, MPI_COMM_WORLD);
-                MPI_Bcast(&matrix[next_non_zero_in_column][0], N, MPI_DOUBLE, process_rank, MPI_COMM_WORLD);
-                MPI_Bcast(&identity[i][0], N, MPI_DOUBLE, process_rank, MPI_COMM_WORLD);
-                MPI_Bcast(&identity[next_non_zero_in_column][0], N, MPI_DOUBLE, process_rank, MPI_COMM_WORLD);
-            }
-        }
-
-        // Wait for the other processes to also complete these steps
-        MPI_Barrier(MPI_COMM_WORLD);
-    }
-}
-
 void gaussian_elimination(
     int process_rank,
     int num_processes,
@@ -204,7 +170,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    initial_row_switcheratoo(my_rank, comm_size, N, matrix, identity);
     gaussian_elimination(my_rank, comm_size, N, matrix, identity);
     back_substitution(my_rank, comm_size, N, matrix, identity);
 
