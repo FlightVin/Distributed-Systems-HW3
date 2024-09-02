@@ -1,13 +1,5 @@
 .vscode
-*out*
-*input*
-*temp*
-ignore_this/
-input.txt
-output.txt
-coroutput.txt
-brute*
-test*
+*.out
 *.sh
 results/
-mpi_*
+
