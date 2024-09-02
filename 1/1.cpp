@@ -1,3 +1,9 @@
+/**
+ * Distributed Solution for Q1 - Distributed kNN
+ * author: Omerprogrammer
+ *
+ */
+
 #include <mpi.h>
 #include <iostream>
 #include <fstream>
