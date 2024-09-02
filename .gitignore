@@ -3,3 +3,11 @@
 *input*
 *temp*
 ignore_this/
+input.txt
+output.txt
+coroutput.txt
+brute*
+test*
+*.sh
+results/
+mpi_*

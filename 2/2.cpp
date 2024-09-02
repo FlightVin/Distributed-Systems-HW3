@@ -75,8 +75,8 @@ int compute_for_point_per_process(double real, double imag, int K, double T, dou
 }
 
 void attach_grid_coordinates(double* real_pointer, double* imag_pointer, int i, int j, int N, int M){
-    *real_pointer = static_cast<double>(-1.5) + (static_cast<double>(i-1) * 3.0)/static_cast<double>(N - 1);
-    *imag_pointer = static_cast<double>(1.5) - (static_cast<double>(j-1) * 3.0)/static_cast<double>(M - 1); 
+    *real_pointer = static_cast<double>(-1.5) + (static_cast<double>(i-1) * 3.0)/static_cast<double>(M - 1);
+    *imag_pointer = static_cast<double>(1.5) - (static_cast<double>(j-1) * 3.0)/static_cast<double>(N - 1); 
 }
 
 int check_for_current_grid_coordinate(
@@ -229,24 +229,34 @@ int main(int argc, char* argv[]) {
 	string res = compute_answer_per_proc(start_idx, end_idx, N, M, K, T, c_r, c_i);
 	// **********************************************************************
 
+    // wait for everyone to complete
+    MPI_Barrier(MPI_COMM_WORLD);
 
-
-	// now print it in a sequential order
+	// Printing the answer
 	// **********************************************************************
-	int i = 0;
-	while(i < my_rank)
-	{
-		MPI_Barrier(MPI_COMM_WORLD);
-		i++;
-	}
- 
-    cout<<res; cout.flush();
- 
-	while(i < comm_size)
-	{
-		MPI_Barrier(MPI_COMM_WORLD);
-		i++;
-	}
+    int res_len = res.size();
+    vector<int> lengths(comm_size);
+    MPI_Gather(&res_len, 1, MPI_INT, lengths.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    vector<int> displs(comm_size);
+    int total_length = 0;
+    if (my_rank == 0) {
+        displs[0] = 0;
+        for (int i = 1; i < comm_size; ++i) {
+            displs[i] = displs[i-1] + lengths[i-1];
+        }
+        total_length = displs[comm_size-1] + lengths[comm_size-1];
+    }
+
+    vector<char> all_strings(total_length);
+    MPI_Gatherv(res.c_str(), res_len, MPI_CHAR, all_strings.data(), lengths.data(), displs.data(), MPI_CHAR, 0, MPI_COMM_WORLD);
+
+    if (my_rank == 0) {
+        for (int i = 0; i < comm_size; ++i) {
+            string proc_result(all_strings.data() + displs[i], lengths[i]);
+            cout << proc_result; cout.flush();
+        }
+    }
 	// **********************************************************************
 
 	MPI_Finalize();
