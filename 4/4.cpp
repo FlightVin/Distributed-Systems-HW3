@@ -7,7 +7,7 @@
 #include <mpi.h>
 using namespace std;
 
-vector<vector<double>> read_file(int argc, char* argv[]) {
+vector <vector <double>> read_file(int argc, char* argv[]) {
     assert(argc >= 2);
 
     string filepath = argv[1];
@@ -21,7 +21,7 @@ vector<vector<double>> read_file(int argc, char* argv[]) {
     int N;
     file >> N;
 
-    vector<vector<double>> matrix(N, vector<double>(N));
+    vector <vector <double>> matrix(N, vector<double>(N));
 
     for (int i = 0; i<N; i++) {
         for (int j = 0; j<N; j++) {
@@ -69,12 +69,60 @@ void gaussian_elimination(
         // Determine the process that owns the pivot row
         int pivot_owner_process_rank = owner_process(i, num_processes);
 
+        /**
+         * We need to additionally handle row swapping here if matrix[i][i] is 0
+         * 
+         * To do this, we ask all processes which is the next row where the i-th column is not 0
+         */
+        int next_non_zero_row = -1;
+        for (int next_row = i + 1; next_row<N; next_row++){
+            if (check_if_row_in_scope_of_process(process_rank, num_processes, next_row)){
+                if (fabs(matrix[next_row][i]) >= 1e-12){
+                    next_non_zero_row = next_row;
+                    break;
+                }
+            }
+        }
+        // Wait for all processes to complete this step of finding the next non-zero column
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Now, we get the maximum possible index of the row (to account for next_non_zero_row >= i)
+        int best_next_non_zero_row;
+        MPI_Allreduce(&next_non_zero_row, &best_next_non_zero_row, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
+        if (best_next_non_zero_row >= 0){
+            // sanity check - simply broadcast the two rows
+            MPI_Bcast(&identity[best_next_non_zero_row][0], N, MPI_DOUBLE, owner_process(best_next_non_zero_row, num_processes), MPI_COMM_WORLD);
+            MPI_Bcast(&matrix[best_next_non_zero_row][0], N, MPI_DOUBLE, owner_process(best_next_non_zero_row, num_processes), MPI_COMM_WORLD);
+            
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            if (check_if_row_in_scope_of_process(process_rank, num_processes, i)){
+                if (fabs(matrix[i][i]) < 1e-12) {
+                    // sanity check
+                    if (best_next_non_zero_row > i) {
+                        // swap the two rows in local copy
+                        swap_rows_in_square_matrix(matrix, N, best_next_non_zero_row, i);
+                        swap_rows_in_square_matrix(identity, N, best_next_non_zero_row, i);
+                    } 
+                }
+            }
+
+            // ask all the other processes to also swap the rows
+            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Bcast(&matrix[i][0], N, MPI_DOUBLE, pivot_owner_process_rank, MPI_COMM_WORLD);
+            MPI_Bcast(&identity[best_next_non_zero_row][0], N, MPI_DOUBLE, pivot_owner_process_rank, MPI_COMM_WORLD);
+            MPI_Bcast(&matrix[best_next_non_zero_row][0], N, MPI_DOUBLE, pivot_owner_process_rank, MPI_COMM_WORLD);
+            MPI_Bcast(&identity[i][0], N, MPI_DOUBLE, pivot_owner_process_rank, MPI_COMM_WORLD);
+        }
+
         // Broadcast the pivot value
         if (check_if_row_in_scope_of_process(process_rank, num_processes, i)) {
             double pivot_val = matrix[i][i];
 
             // Check if the pivot is non-zero
             if (fabs(pivot_val) < 1e-12) {
+                // This will anyway not happen if the matrix is guaranteed to be invertible but why not
                 MPI_Abort(MPI_COMM_WORLD, 1);
                 return;
             }
@@ -142,7 +190,7 @@ int main(int argc, char* argv[]) {
     int comm_size;
     MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
-    vector<vector<double>> matrix_vec;
+    vector <vector <double>> matrix_vec;
 
     if (my_rank == 0) {
         matrix_vec = read_file(argc, argv);
@@ -162,6 +210,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 0; i<N; i++)
         MPI_Bcast(&matrix[i][0], N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        // *NOTE* - but every process can only access its own data, not i-th rows belong to other processes
 
     double** identity = allocate_square_array(N);
     for (int i = 0; i<N; i++) {
