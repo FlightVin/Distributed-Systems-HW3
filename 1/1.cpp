@@ -72,15 +72,25 @@ int main(int argc, char** argv) {
     MPI_Type_contiguous(2, MPI_DOUBLE, &MPI_POINT);
     MPI_Type_commit(&MPI_POINT);
 
+    MPI_Datatype MPI_DISTANCEPOINT;
+    MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_DISTANCEPOINT);
+    MPI_Type_commit(&MPI_DISTANCEPOINT);
+
     std::vector<int> sendcounts(world_size), displs(world_size);
     for (int i = 0; i < world_size; ++i) {
         sendcounts[i] = N / world_size + (i < remainder ? 1 : 0);
         displs[i] = i * (N / world_size) + std::min(i, remainder);
     }
 
+    // Synchronize before scattering
+    MPI_Barrier(MPI_COMM_WORLD);
+
     MPI_Scatterv(P.data(), sendcounts.data(), displs.data(), MPI_POINT,
                  local_P.data(), local_size, MPI_POINT,
                  0, MPI_COMM_WORLD);
+
+    // Synchronize after scattering
+    MPI_Barrier(MPI_COMM_WORLD);
 
     for (int q = 0; q < M; q++) {
         Point query_point;
@@ -89,6 +99,9 @@ int main(int argc, char** argv) {
         }
 
         MPI_Bcast(&query_point, 1, MPI_POINT, 0, MPI_COMM_WORLD);
+
+        // Synchronize after broadcasting
+        MPI_Barrier(MPI_COMM_WORLD);
 
         std::vector<DistancePoint> local_distances(local_size);
         for (int i = 0; i < local_size; i++) {
@@ -104,17 +117,20 @@ int main(int argc, char** argv) {
             local_distances.push_back({std::numeric_limits<double>::max(), {0.0, 0.0}}); 
         }
 
+        // Synchronize before gathering
+        MPI_Barrier(MPI_COMM_WORLD);
+
         if (world_rank == 0) {
             std::vector<DistancePoint> gathered_distances(K * world_size);
 
             std::vector<int> recvcounts(world_size), recvdispls(world_size);
             for (int i = 0; i < world_size; ++i) {
-                recvcounts[i] = K * sizeof(DistancePoint); // Always receive K objects
-                recvdispls[i] = i * K * sizeof(DistancePoint); 
+                recvcounts[i] = K;
+                recvdispls[i] = i * K;
             }
 
-            MPI_Gatherv(local_distances.data(), K * sizeof(DistancePoint), MPI_BYTE, 
-                       gathered_distances.data(), recvcounts.data(), recvdispls.data(), MPI_BYTE,
+            MPI_Gatherv(local_distances.data(), K, MPI_DISTANCEPOINT, 
+                       gathered_distances.data(), recvcounts.data(), recvdispls.data(), MPI_DISTANCEPOINT,
                        0, MPI_COMM_WORLD);
 
             std::partial_sort(gathered_distances.begin(), gathered_distances.begin() + K, gathered_distances.end(),
@@ -126,13 +142,21 @@ int main(int argc, char** argv) {
                           << gathered_distances[i].point.y << std::endl;
             }
         } else {
-            MPI_Gatherv(local_distances.data(), K * sizeof(DistancePoint), MPI_BYTE,
-                       nullptr, nullptr, nullptr, MPI_BYTE,
+            MPI_Gatherv(local_distances.data(), K, MPI_DISTANCEPOINT,
+                       nullptr, nullptr, nullptr, MPI_DISTANCEPOINT,
                        0, MPI_COMM_WORLD);
         }
+
+        // Synchronize after gathering
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 
     MPI_Type_free(&MPI_POINT);
+    MPI_Type_free(&MPI_DISTANCEPOINT);
+
+    // Synchronize before finalizing
+    MPI_Barrier(MPI_COMM_WORLD);
+
     MPI_Finalize();
     return 0;
 }
